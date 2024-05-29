@@ -4,9 +4,20 @@ import numpy as np
 import h5py as h5
 from scipy.signal import tukey
 from scipy.interpolate import interp1d
-# A selection of units that can be used in this module, and imported
 
-WF_DIR = "/Users/fipanther/Documents/Work/waveforms/CoRE_waveforms"
+
+# If you set the environment variable 'PYWIFES_DIR' then it will be found
+NRWF_ENV = os.getenv('NRWAVEFORM_DIR')
+
+# Otherwise, just look where we are right now, and go from there
+if NRWF_ENV  == None:
+    # Where are we located ?
+    WF_DIR = os.path.dirname(__file__)
+else:
+    WFDIR = NRWF_ENV
+
+
+#useful units
 
 cc = 299792458.0  # speed of light in m/s
 GG = 6.67384e-11  # Newton in m^3 / (kg s^2)
@@ -86,7 +97,7 @@ class NRWaveform:
 		# crop the time array to match
 		self.tnew = time_scaled[self.tstartindex:]
 
-	def interpolate_wf_to_new_tarray(self, newtime, t_0, tukey_rolloff = 0.2):
+	def interpolate_wf_to_new_tarray(self, newtime, t_0, window = True, tukey_rolloff = 0.2):
 
 		t_interp = self.tnew + t_0
 		hplus_interp_func = interp1d(t_interp,
@@ -105,17 +116,40 @@ class NRWaveform:
 		hcross = np.zeros(newtime.shape)
 
 		# windowing
-		window_dt = tout[-1]-tout[0]
-		tukey_rolloff_ms=  tukey_rolloff/1000    
-		window = tukey(len(tout), 2 * tukey_rolloff_ms / window_dt) 
+		if window = True:
+			window_dt = tout[-1]-tout[0]
+			tukey_rolloff_ms=  tukey_rolloff/1000    
+			window = tukey(len(tout), 2 * tukey_rolloff_ms / window_dt) 
 
 
-		hplus[tstartindex_new:]  = hplus_interp_func(tout) * window
-		hcross[tstartindex_new:] = hcross_interp_func(tout) * window
+			self.hplus[tstartindex_new:]  = hplus_interp_func(tout) * window
+			self.hcross[tstartindex_new:] = hcross_interp_func(tout) * window
 
-		return {'plus': hplus, 'cross': hcross}
+		else:
+
+			self.hplus[tstartindex_new:]  = hplus_interp_func(tout)
+			self.hcross[tstartindex_new:] = hcross_interp_func(tout)
 
 
+		return {'plus': self.hplus, 'cross': self.hcross}
+
+class DampedSinWaveforms():
+	def __init__(self, sample_rate):
+		self.sample_rate = sample_rate
+
+		def damped_sinusoid_td(self, duration, t_0, amplitude, damping_time, frequency, phase, t_0):
+
+			self.time = np.linspace(t_0, duration, int((duration-t_0)*sample_rate))
+
+			A = amplitude*np.exp(-time/damping_time)
+			theta = 2*np.pi*frequency*time + phi
+
+			self.hplus = A * np.sin(theta)
+			self.hcross = A * np.cos(theta)
+
+			return {'plus': self.hplus, 'cross': self.hcross}
+
+		
 
 
 
