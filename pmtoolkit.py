@@ -14,8 +14,7 @@ if NRWF_ENV  == None:
     # Where are we located ?
     WF_DIR = os.path.dirname(__file__)
 else:
-    WFDIR = NRWF_ENV
-
+    WF_DIR = NRWF_ENV
 
 #useful units
 
@@ -49,7 +48,7 @@ def list_wf_labels():
 	WF_SUBDIR_AVAIL = []
 	for this_dir in WF_AVAIL:
 		this_path = os.path.join(WF_DIR,this_dir)
-		this_subdir_avail =  [f for f in os.listdir(this_path) if 'R' in f]
+		this_subdir_avail =  [f for f in os.listdir(this_path) if 'R0' in f]
 		for i in this_subdir_avail:
 			WF_SUBDIR_AVAIL.append(os.path.join(this_dir,i))
 	return WF_SUBDIR_AVAIL
@@ -112,11 +111,11 @@ class NRWaveform:
 		tstartindex_new = np.argmax(newtime >= t_0 )
 		tout = newtime[tstartindex_new:] # this is taken care of by the interpolation 
 
-		hplus = np.zeros(newtime.shape)
-		hcross = np.zeros(newtime.shape)
+		self.hplus = np.zeros(newtime.shape)
+		self.hcross = np.zeros(newtime.shape)
 
 		# windowing
-		if window = True:
+		if window == True:
 			window_dt = tout[-1]-tout[0]
 			tukey_rolloff_ms=  tukey_rolloff/1000    
 			window = tukey(len(tout), 2 * tukey_rolloff_ms / window_dt) 
@@ -137,7 +136,7 @@ class DampedSinWaveforms():
 	def __init__(self, sample_rate):
 		self.sample_rate = sample_rate
 
-		def damped_sinusoid_td(self, duration, t_0, amplitude, damping_time, frequency, phase, t_0):
+		def damped_sinusoid_td(self, duration, t_0, amplitude, damping_time, frequency, phase):
 
 			self.time = np.linspace(t_0, duration, int((duration-t_0)*sample_rate))
 
