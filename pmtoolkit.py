@@ -53,6 +53,35 @@ def list_wf_labels():
 			WF_SUBDIR_AVAIL.append(os.path.join(this_dir,i))
 	return WF_SUBDIR_AVAIL
 
+def inner_product_MF(hf_1, hf_2, frequency, psd, model_variance = None):
+	"""
+	hf_(1,2) are the (one-sided) FT of a waveform generated e.g. using nfft
+	"""
+
+	if model_variance == None:
+		model_variance = np.zeros(len(psd))
+	else:
+		model_variance = np.array(model_variance).astype(float)
+	# calculate the inner product
+	integrand = np.conj(h_1) * h_2 / (psd + model_variance)
+
+	df = frequencies[1] - frequencies[0]
+	integral = np.sum(integrand) * df
+
+	out = 4. * np.real(integral)
+
+	return out 
+
+def overlap_MF(hf_1, hf_2, frequency, psd, model_variance = None):
+	"""
+	calculate the overlap between two waveforms hf_1, hf_2
+	"""
+	inner_12 = inner_product_MF(hf_1, hf_2, frequency, psd, model_variance)
+	inner_11 = inner_product_MF(hf_1, hf_1, frequency, psd, model_variance)
+	inner_22 = inner_product_MF(hf_2, hf_2, frequency, psd, model_variance)
+
+	return inner_12/np.sqrt(inner_11*inner_22)
+
 # Parse the CORE models into something useable
 class NRWaveform:
 	def __init__(self, wf_label, loudness = 1):
@@ -132,23 +161,133 @@ class NRWaveform:
 
 		return {'plus': self.hplus, 'cross': self.hcross}
 
-class DampedSinWaveforms():
-	def __init__(self, sample_rate):
-		self.sample_rate = sample_rate
 
-		def damped_sinusoid_td(self, duration, t_0, amplitude, damping_time, frequency, phase):
+def damped_sinusoid_td(sample_rate, duration, **kwargs):
 
-			self.time = np.linspace(t_0, duration, int((duration-t_0)*sample_rate))
+	"""
+	duration in seconds
+	damping time in ms
+	frequency in Hz
+	amplitude in log10
+	:amplitude, damping_time, frequency, phase, drift = None):
+	"""
 
-			A = amplitude*np.exp(-time/damping_time)
-			theta = 2*np.pi*frequency*time + phi
+	# parse kwargs:
+	if kwargs['weight']==None:
+		weight = 1
+	else:
+		weight = kwargs['weight']
+	amplitude = weight * 10 ** kwargs['amplitude']
+	damping_time = kwargs['damping_time'] / 1000.
+	frequency = kwargs['frequency']
+	phase = kwargs['phase']
+	drift = kwargs['drift']
 
-			self.hplus = A * np.sin(theta)
-			self.hcross = A * np.cos(theta)
+	time = np.linspace(0, duration, int(duration*sample_rate))
+	hplus = np.zeros(len(time))
+	hcross = hplus.copy()
 
-			return {'plus': self.hplus, 'cross': self.hcross}
+	if drift is not None:
+		h_cplx = amplitude*np.exp(-time/damping_time)*\
+									np.exp(1j * ( 2*np.pi*frequency*time*(1+drift*time) + phase))
 
-		
+		hplus += np.imag(h_cplx)
+		hcross += np.real(h_cplx)
+	else:
+		A = amplitude*np.exp(-time/damping_time)
+		theta = 2*np.pi*frequency*t_calc + phase
+
+		hplus += A * np.sin(theta)
+		hcross += A * np.cos(theta)
+
+	return {'plus': hplus, 'cross': hcross, 'time': time}
+
+def multi_sin(sample_rate, duration, wf_order, window = True, rolloff = 0.2,  **kwargs):
+	"""
+	take the damped_sinusoid_td function and construct multi-d damped sinusoid
+	"""
 
 
+	time = np.linspace(0, duration, int(duration*sample_rate))
+	hplus = np.zeros(len(time))
+	hcross = hplus.copy()
+
+	for wf_component_i in range(wf_order):
+		if wf_component_i == int(wf_order-1):
+			weight = 1 - sum([kwargs[f'weight_{A}'] for A in range(wf_order - 1)])
+		else:
+			weight = kwargs[f'weight_{wf_component_i}']
+		amplitude = np.log10(weight * 10 ** kwargs[f'amplitude_{wf_component_i}'])
+		damping_time = kwargs[f'damping_time_{wf_component_i}']
+		frequency = kwargs[f'frequency_{wf_component_i}']
+		phase = kwargs[f'phase_{wf_component_i}']
+		drift = kwargs[f'drift_{wf_component_i}']
+		# does this need a time offset?
+
+		wf_i = damped_sinusoid_td(sample_rate, duration, weight = weight,
+														amplitude = amplitude,
+														damping_time = damping_time,
+														frequency = frequency,
+														phase = phase, 
+														drift = drift)
+
+		# does this need a time offset?
+
+		if window == True:
+			window_dt = time[-1]-time[0]
+			tukey_rolloff_ms=  rolloff/1000    
+			this_window = tukey(len(time), 2 * tukey_rolloff_ms / window_dt) 
+
+
+			wf_plus = wf_i['plus'] * this_window
+			wf_cross = wf_i['cross'] * this_window
+
+		else:
+
+			wf_plus = wf_i['plus']
+			wf_cross = wf_i['cross']
+
+
+
+		hplus += wf_i['plus']
+		hcross += wf_i['cross']
+
+	return {'plus': hplus, 'cross': hcross, 'time': time}
+			
+
+def interpolate_any_wf_to_new_tarray(waveform, newtime, t_0, window = True, tukey_rolloff = 0.2):
+
+		time = waveform['time'] + t_0
+		hplus_interp_func = interp1d(time,
+		                         waveform['plus'],
+		                         bounds_error=False, fill_value=0)
+
+		hcross_interp_func = interp1d(time, 
+								waveform['cross'],
+		                         bounds_error=False, fill_value=0)
+
+		# redefine tstartindex based on interpolated data
+		tstartindex_new = np.argmax(newtime >= t_0 )
+		tout = newtime[tstartindex_new:] # this is taken care of by the interpolation 
+
+		hplus = np.zeros(newtime.shape)
+		hcross = np.zeros(newtime.shape)
+
+		# windowing
+		if window == True:
+			window_dt = tout[-1]-tout[0]
+			tukey_rolloff_ms=  tukey_rolloff/1000    
+			this_window = tukey(len(tout), 2 * tukey_rolloff_ms / window_dt) 
+
+
+			hplus[tstartindex_new:]  = hplus_interp_func(tout) * this_window
+			hcross[tstartindex_new:] = hcross_interp_func(tout) * this_window
+
+		else:
+
+			hplus[tstartindex_new:]  = hplus_interp_func(tout)
+			hcross[tstartindex_new:] = hcross_interp_func(tout)
+
+
+		return {'plus': hplus, 'cross': hcross, 'time': tout}
 
